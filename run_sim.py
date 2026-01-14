@@ -14,4 +14,6 @@ sim = FeedbackLoopFairnessDegradationSimulator(
     sensitive_variables=['sex', 'race']
 )
 
+sim.set_show_iteration_plots(False)
+
 results = sim.run_simulation(n_iterations=3)

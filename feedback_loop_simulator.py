@@ -44,10 +44,22 @@ class FeedbackLoopFairnessDegradationSimulator:
         self.sensitive_vars = sensitive_variables
         self.sensitive_data_original = self.data[self.sensitive_vars].copy()
         self.display_func = display_func if display_func else print
+        self.show_iteration_plots = True
         self._preprocess_data()
         self.is_classification = self._detect_task_type()
         self.all_results = []
-        
+
+
+    # ------------------------------------------------------------------
+    # Setter for showing iteration plots
+    # ------------------------------------------------------------------
+    def set_show_iteration_plots(self, show):
+        """
+        Set whether to display plots for each iteration.
+        Useful with higher number of iterations to reduce output length,
+        """
+        self.show_iteration_plots = show
+
 
     # ------------------------------------------------------------------
     # Preprocessing data
@@ -65,9 +77,9 @@ class FeedbackLoopFairnessDegradationSimulator:
         # Store for printing preprocessing steps
         self.target_encoder = None
         
-        print(f"{'='*180}")
+        print(f"{'='*150}")
         print(f"Data Preprocessing")
-        print(f"{'='*180}")
+        print(f"{'='*150}")
         print()
 
         # Encode target var if categorical
@@ -114,9 +126,9 @@ class FeedbackLoopFairnessDegradationSimulator:
         y = self.data[self.target]
         task_type = type_of_target(y)
 
-        print(f"\n{'='*180}")
+        print(f"\n{'='*150}")
         print(f"Detect Model Task Type")
-        print(f"{'='*180}")
+        print(f"{'='*150}")
         print()
 
         print(f"Detected task type: {task_type} classification" if task_type in ["binary", "multiclass"] else f"Detected task type: {task_type} regression")
@@ -152,8 +164,6 @@ class FeedbackLoopFairnessDegradationSimulator:
         - Regression:
             * MAE, MSE, R²
             * Mean and standard deviation of residuals
-
-        Returns a DataFrame indexed by sensitive group.
         """
         if self.is_classification:
             # Check if binary or multiclass
@@ -207,8 +217,40 @@ class FeedbackLoopFairnessDegradationSimulator:
 
         return mf.by_group
 
+
     # ------------------------------------------------------------------
-    # Simulation
+    # Compute DPD and EOD for iteration
+    # ------------------------------------------------------------------
+    def _compute_aggregate_fairness(self, y_true, y_pred, sensitive_series):
+        """
+        Compute aggregate fairness metrics for binary classification.
+
+        - Demographic Parity Difference (DPD)
+        - Equalized Odds Difference (EOD)
+        """
+        n_classes = len(np.unique(y_true))
+        is_binary = n_classes == 2
+        
+        if not self.is_classification or not is_binary:
+            return None, None
+        
+        dpd = demographic_parity_difference(
+            y_true=y_true,
+            y_pred=y_pred,
+            sensitive_features=sensitive_series
+        )
+        
+        eod = equalized_odds_difference(
+            y_true=y_true,
+            y_pred=y_pred,
+            sensitive_features=sensitive_series
+        )
+        
+        return dpd, eod
+
+
+    # ------------------------------------------------------------------
+    # Simulation runner
     # ------------------------------------------------------------------
     def run_simulation(self, n_iterations):
         """
@@ -221,25 +263,15 @@ class FeedbackLoopFairnessDegradationSimulator:
         4. Evaluate on the next data split
         5. Compute and visualize group-level fairness metrics
         6. Store results for summary visualization
-        
-        Parameters
-        ----------
-        n_iterations : int
-            Number of iterations to run the simulation.
-            
-        Returns
-        -------
-        list
-            List of result dictionaries for each iteration.
         """
         self.all_results = []
         partitions = self.data_split(n_iterations)
 
         prev_predictions = None
 
-        print(f"\n{'='*180}")
+        print(f"\n{'='*150}")
         print(f"Starting Fairness Degradation Simulation with {n_iterations} Iterations")
-        print(f"{'='*180}")
+        print(f"{'='*150}")
         print()
 
         for i in range(n_iterations):
@@ -298,24 +330,9 @@ class FeedbackLoopFairnessDegradationSimulator:
                 iteration_result["fairness"][s] = grouped_metrics
 
                 # Compute DPD and EOD (binary classification only)
-                demo_parity = None
-                eqo = None
-                n_classes = len(np.unique(y_test))
-                is_binary = n_classes == 2
+                demo_parity, eqo = self._compute_aggregate_fairness(y_test, y_pred, test_df[s])
                 
-                if self.is_classification and is_binary:
-                    demo_parity = demographic_parity_difference(
-                        y_true=y_test,
-                        y_pred=y_pred,
-                        sensitive_features=test_df[s]
-                    )
-
-                    eqo = equalized_odds_difference(
-                        y_true=y_test,
-                        y_pred=y_pred,
-                        sensitive_features=test_df[s]
-                    )
-
+                if demo_parity is not None and eqo is not None:
                     # Store aggregate metrics
                     if s not in iteration_result["aggregate_fairness"]:
                         iteration_result["aggregate_fairness"][s] = {}
@@ -331,14 +348,15 @@ class FeedbackLoopFairnessDegradationSimulator:
                 print()
                 
                 # Display DPD and EOD table (binary classification only)
-                if self.is_classification and is_binary:
+                if demo_parity is not None and eqo is not None:
                     aggregate_df = pd.DataFrame({
                         "DPD": [demo_parity],
                         "EOD": [eqo]
                     }, index=[s])
                     self.display_func(aggregate_df)
 
-                self.plot_iteration_results(grouped_metrics, s, i + 1, demo_parity, eqo)
+                if self.show_iteration_plots:
+                    self.plot_iteration_results(grouped_metrics, s, i + 1, demo_parity, eqo)
 
             self.all_results.append(iteration_result)
 
@@ -347,7 +365,7 @@ class FeedbackLoopFairnessDegradationSimulator:
 
 
     # ------------------------------------------------------------------
-    # Plotting
+    # Iteration results plotting
     # ------------------------------------------------------------------
     def plot_iteration_results(self, df, sensitive_var, iteration, dpd=None, eod=None):
         """
@@ -477,6 +495,10 @@ class FeedbackLoopFairnessDegradationSimulator:
 
         plt.show()
 
+
+    # ------------------------------------------------------------------
+    # Summary results plotting
+    # ------------------------------------------------------------------
     def plot_summary_results(self):
         """
         Visualize how fairness and performance metrics evolve
@@ -486,9 +508,9 @@ class FeedbackLoopFairnessDegradationSimulator:
         - DPD and EOD are plotted separately (classification only)
         """
 
-        print(f"\n{'='*180}")
+        print(f"\n{'='*150}")
         print(f"Summary of Metrics Over Time")
-        print(f"{'='*180}")
+        print(f"{'='*150}")
 
 
         if not self.all_results:
