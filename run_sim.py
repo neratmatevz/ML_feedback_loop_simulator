@@ -1,7 +1,6 @@
 from feedback_loop_simulator import FeedbackLoopFairnessDegradationSimulator
 from sklearn.ensemble import RandomForestClassifier
 from fairlearn.datasets import fetch_adult
-from feedback_loop_simulator import FeedbackLoopFairnessDegradationSimulator
 
 data = fetch_adult()
 df = data.frame

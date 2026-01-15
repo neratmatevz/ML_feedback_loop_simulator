@@ -35,6 +35,13 @@ class FeedbackLoopFairnessDegradationSimulator:
     Supports:
     - Classification: performance and fairness metrics by group
     - Regression: error and residual-based disparity metrics
+
+    Init params:
+        model: sklearn-compatible model
+        dataset: pandas DataFrame with features, target, and sensitive columns
+        target_variable: str - name of the target column
+        sensitive_variables: list of str - names of sensitive attribute columns
+        display_func: callable (optional) - function to display DataFrames (default: print)
     """
 
     def __init__(self, model, dataset, target_variable, sensitive_variables, display_func=None):
@@ -56,7 +63,10 @@ class FeedbackLoopFairnessDegradationSimulator:
     def set_show_iteration_plots(self, show):
         """
         Set whether to display plots for each iteration.
-        Useful with higher number of iterations to reduce output length,
+        Useful with higher number of iterations to reduce output length.
+
+        Input: show (bool) - True to display plots, False to hide
+        Output: None
         """
         self.show_iteration_plots = show
 
@@ -121,7 +131,10 @@ class FeedbackLoopFairnessDegradationSimulator:
     def _detect_task_type(self):
         """
         Detect whether the task is classification or regression 
-        based on the target variable. 
+        based on the target variable.
+
+        Input: None 
+        Output: bool - True if classification, False if regression
         """
         y = self.data[self.target]
         task_type = type_of_target(y)
@@ -145,6 +158,9 @@ class FeedbackLoopFairnessDegradationSimulator:
 
         The data is divided into (n_iterations + 1) parts so that
         each iteration trains on one part and tests on the next.
+
+        Input: n_iterations (int) - number of simulation iterations
+        Output: list of DataFrames - sequential data partitions
         """
         n_parts = n_iterations + 1
         return np.array_split(self.data, n_parts)
@@ -164,6 +180,9 @@ class FeedbackLoopFairnessDegradationSimulator:
         - Regression:
             * MAE, MSE, R²
             * Mean and standard deviation of residuals
+
+        Input: y_true (array), y_pred (array), sensitive_series (Series)
+        Output: DataFrame - metrics per sensitive group
         """
         if self.is_classification:
             # Check if binary or multiclass
@@ -227,6 +246,9 @@ class FeedbackLoopFairnessDegradationSimulator:
 
         - Demographic Parity Difference (DPD)
         - Equalized Odds Difference (EOD)
+
+        Input: y_true (array), y_pred (array), sensitive_series (Series)
+        Output: (DPD, EOD) tuple of floats, or (None, None) if not binary
         """
         n_classes = len(np.unique(y_true))
         is_binary = n_classes == 2
@@ -263,6 +285,9 @@ class FeedbackLoopFairnessDegradationSimulator:
         4. Evaluate on the next data split
         5. Compute and visualize group-level fairness metrics
         6. Store results for summary visualization
+
+        Input: n_iterations (int) - number of feedback loop iterations
+        Output: None (stores results in self.all_results, displays plots)
         """
         self.all_results = []
         partitions = self.data_split(n_iterations)
@@ -374,6 +399,9 @@ class FeedbackLoopFairnessDegradationSimulator:
         - Creates bar charts for each metric by sensitive group
         - Optionally displays Demographic Parity Difference (DPD)
         and Equalized Odds Difference (EOD) for binary classification
+
+        Input: df (DataFrame), sensitive_var (str), iteration (int), dpd (float), eod (float)
+        Output: None (displays matplotlib plots)
         """
         df_plot = df.reset_index().melt(
             id_vars=sensitive_var,
@@ -506,6 +534,9 @@ class FeedbackLoopFairnessDegradationSimulator:
 
         - Line plots show metric trends over time by group
         - DPD and EOD are plotted separately (classification only)
+
+        Input: None 
+        Output: None (displays matplotlib summary plots)
         """
 
         print(f"\n{'='*150}")
