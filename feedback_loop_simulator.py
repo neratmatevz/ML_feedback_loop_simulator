@@ -29,63 +29,81 @@ from fairlearn.metrics import (
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 class FeedbackLoopFairnessDegradationSimulator:
-    """
-    Simulates how model performance and fairness change over time because of ML feedback loops.
+    """Simulate how model performance and fairness change over time due to ML feedback loops.
+
+    This simulator demonstrates how predictions used as future training labels can cause
+    model performance and fairness metrics to degrade over successive iterations.
 
     Supports:
-    - Classification: performance and fairness metrics by group
-    - Regression: error and residual-based disparity metrics
+        - Classification: performance and fairness metrics by group
+        - Regression: error and residual-based disparity metrics
 
-    Init params:
-        model: sklearn-compatible model
-        dataset: pandas DataFrame with features, target, and sensitive columns
-        target_variable: str - name of the target column
-        sensitive_variables: list of str - names of sensitive attribute columns
-        display_func: callable (optional) - function to display DataFrames (default: print)
+    Parameters
+    ----------
+    model : estimator
+        An sklearn-compatible model with fit() and predict() methods.
+    dataset : pandas.DataFrame
+        DataFrame containing features, target, and sensitive attribute columns.
+    target_variable : str
+        Name of the target column in the dataset.
+    sensitive_variables : list of str
+        Names of sensitive attribute columns for fairness analysis.
+    display_func : callable, optional
+        Function to display DataFrames. Default is print().
+
+    Methods
+    -------
+    `set_show_iteration_data(show)`
+        Toggle iteration data display.
+    `run_simulation(n_iterations)`
+        Execute the simulation.
     """
 
     def __init__(self, model, dataset, target_variable, sensitive_variables, display_func=None):
-        self.base_model = model
-        self.data = dataset.reset_index(drop=True).copy()
-        self.target = target_variable
-        self.sensitive_vars = sensitive_variables
-        self.sensitive_data_original = self.data[self.sensitive_vars].copy()
-        self.display_func = display_func if display_func else print
-        self.show_iteration_plots = True
+        self._base_model = model
+        self._data = dataset.reset_index(drop=True).copy()
+        self._target = target_variable
+        self._sensitive_vars = sensitive_variables
+        self._sensitive_data_original = self._data[self._sensitive_vars].copy()
+        self._display_func = display_func if display_func else print
+        self._show_iteration_data = True
         self._preprocess_data()
-        self.is_classification = self._detect_task_type()
-        self.all_results = []
+        self._is_classification = self._detect_task_type()
+        self._all_results = []
 
 
     # ------------------------------------------------------------------
-    # Setter for showing iteration plots
+    # Setter for showing iteration data
     # ------------------------------------------------------------------
-    def set_show_iteration_plots(self, show):
-        """
-        Set whether to display plots for each iteration.
+    def set_show_iteration_data(self, show):
+        """Set whether to display data and plots for each iteration.
+
         Useful with higher number of iterations to reduce output length.
 
-        Input: show (bool) - True to display plots, False to hide
-        Output: None
+        Parameters
+        ----------
+        show : bool
+            True to display iteration data and plots, False to hide them
+            and show only the final summary.
         """
-        self.show_iteration_plots = show
+        self._show_iteration_data = show
 
 
     # ------------------------------------------------------------------
     # Preprocessing data
     # ------------------------------------------------------------------
     def _preprocess_data(self):
-        """
-        Prepare the dataset for modeling and fairness analysis.
+        """Prepare the dataset for modeling and fairness analysis.
 
-        Steps:
-        1. Encode the target variable if it is categorical
-        2. One-hot encode non-sensitive categorical features
-        3. Encode sensitive variables for modeling while keeping originals for fairness evaluation
+        Performs the following preprocessing steps:
+            1. Encode the target variable if it is categorical
+            2. One-hot encode non-sensitive categorical features
+            3. Encode sensitive variables for modeling while keeping
+               originals for fairness evaluation
         """
 
         # Store for printing preprocessing steps
-        self.target_encoder = None
+        self._target_encoder = None
         
         print(f"{'='*150}")
         print(f"Data Preprocessing")
@@ -93,50 +111,53 @@ class FeedbackLoopFairnessDegradationSimulator:
         print()
 
         # Encode target var if categorical
-        if self.data[self.target].dtype == 'object' or isinstance(self.data[self.target].iloc[0], str):
-            self.target_encoder = LabelEncoder()
-            self.data[self.target] = self.target_encoder.fit_transform(self.data[self.target])
-            print(f"Target variable '{self.target}' encoded: {dict(zip(self.target_encoder.classes_, self.target_encoder.transform(self.target_encoder.classes_)))}")
+        if self._data[self._target].dtype == 'object' or isinstance(self._data[self._target].iloc[0], str):
+            self._target_encoder = LabelEncoder()
+            self._data[self._target] = self._target_encoder.fit_transform(self._data[self._target])
+            print(f"Target variable '{self._target}' encoded: {dict(zip(self._target_encoder.classes_, self._target_encoder.transform(self._target_encoder.classes_)))}")
         
         # Identify categorical variables without target and sensitive variables
         categorical_cols = []
-        for col in self.data.columns:
-            if col != self.target and col not in self.sensitive_vars:
-                if self.data[col].dtype == 'object' or self.data[col].dtype.name == 'category':
+        for col in self._data.columns:
+            if col != self._target and col not in self._sensitive_vars:
+                if self._data[col].dtype == 'object' or self._data[col].dtype.name == 'category':
                     categorical_cols.append(col)
         
         # One-hot encode categorical features
         if categorical_cols:
             print(f"One-hot encoding categorical features: {categorical_cols}")
-            self.data = pd.get_dummies(
-                self.data, 
+            self._data = pd.get_dummies(
+                self._data, 
                 columns=categorical_cols, 
                 drop_first=True,
                 dtype=int
             )
         
         # Encode sensitive variables for use as features (keep originals for fairness metrics)
-        for s_var in self.sensitive_vars:
-            if self.data[s_var].dtype == 'object' or isinstance(self.data[s_var].iloc[0], str):
+        for s_var in self._sensitive_vars:
+            if self._data[s_var].dtype == 'object' or isinstance(self._data[s_var].iloc[0], str):
                 encoder = LabelEncoder()
-                self.data[f"{s_var}_encoded"] = encoder.fit_transform(self.data[s_var])
+                self._data[f"{s_var}_encoded"] = encoder.fit_transform(self._data[s_var])
                 print(f"Sensitive variable '{s_var}' encoded for features: {dict(zip(encoder.classes_, encoder.transform(encoder.classes_)))}")
         
-        print(f"Dataset shape after preprocessing: {self.data.shape}")
+        print(f"Dataset shape after preprocessing: {self._data.shape}")
 
 
     # ------------------------------------------------------------------
     # Detect model task type: Classification vs Regression
     # ------------------------------------------------------------------
     def _detect_task_type(self):
-        """
-        Detect whether the task is classification or regression 
-        based on the target variable.
+        """Detect whether the task is classification or regression.
 
-        Input: None 
-        Output: bool - True if classification, False if regression
+        Determines the task type based on the target variable characteristics
+        using sklearn's type_of_target utility.
+
+        Returns
+        -------
+        bool
+            True if classification (binary or multiclass), False if regression.
         """
-        y = self.data[self.target]
+        y = self._data[self._target]
         task_type = type_of_target(y)
 
         print(f"\n{'='*150}")
@@ -152,39 +173,52 @@ class FeedbackLoopFairnessDegradationSimulator:
     # ------------------------------------------------------------------
     # Data splitting based on iterations
     # ------------------------------------------------------------------
-    def data_split(self, n_iterations):
-        """
-        Split the dataset into sequential chunks for simulation.
+    def _data_split(self, n_iterations):
+        """Split the dataset into sequential chunks for simulation.
 
         The data is divided into (n_iterations + 1) parts so that
         each iteration trains on one part and tests on the next.
 
-        Input: n_iterations (int) - number of simulation iterations
-        Output: list of DataFrames - sequential data partitions
+        Parameters
+        ----------
+        n_iterations : int
+            Number of simulation iterations to run.
+
+        Returns
+        -------
+        list of pandas.DataFrame
+            Sequential data partitions for train/test splits.
         """
         n_parts = n_iterations + 1
-        return np.array_split(self.data, n_parts)
+        return np.array_split(self._data, n_parts)
 
 
     # ------------------------------------------------------------------
     # Calculate performance and fairness metrics for iteration
     # ------------------------------------------------------------------
     def _compute_metrics_by_group(self, y_true, y_pred, sensitive_series):
-        """
-        Compute performance and fairness metrics separately
-        for each sensitive group.
+        """Compute performance and fairness metrics for each sensitive group.
 
-        - Classification:
-            * Accuracy, F1, Precision, Recall
-            * Selection Rate, TPR, FNR (binary only)
-        - Regression:
-            * MAE, MSE, R²
-            * Mean and standard deviation of residuals
+        Calculates group-specific metrics using Fairlearn's MetricFrame:
+            - Classification: Accuracy, F1, Precision, Recall,
+              Selection Rate, TPR, FNR (binary only)
+            - Regression: MAE, MSE, R², mean and std of residuals
 
-        Input: y_true (array), y_pred (array), sensitive_series (Series)
-        Output: DataFrame - metrics per sensitive group
+        Parameters
+        ----------
+        y_true : array-like
+            True target values.
+        y_pred : array-like
+            Predicted values from the model.
+        sensitive_series : pandas.Series
+            Sensitive attribute values for grouping.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Metrics computed for each sensitive group.
         """
-        if self.is_classification:
+        if self._is_classification:
             # Check if binary or multiclass
             n_classes = len(np.unique(y_true))
             is_binary = n_classes == 2
@@ -241,19 +275,30 @@ class FeedbackLoopFairnessDegradationSimulator:
     # Compute DPD and EOD for iteration
     # ------------------------------------------------------------------
     def _compute_aggregate_fairness(self, y_true, y_pred, sensitive_series):
-        """
-        Compute aggregate fairness metrics for binary classification.
+        """Compute aggregate fairness metrics for binary classification.
 
-        - Demographic Parity Difference (DPD)
-        - Equalized Odds Difference (EOD)
+        Calculates Demographic Parity Difference (DPD) and Equalized Odds
+        Difference (EOD) using Fairlearn metrics.
 
-        Input: y_true (array), y_pred (array), sensitive_series (Series)
-        Output: (DPD, EOD) tuple of floats, or (None, None) if not binary
+        Parameters
+        ----------
+        y_true : array-like
+            True target values.
+        y_pred : array-like
+            Predicted values from the model.
+        sensitive_series : pandas.Series
+            Sensitive attribute values for fairness computation.
+
+        Returns
+        -------
+        tuple of (float, float) or (None, None)
+            (DPD, EOD) values for binary classification,
+            or (None, None) if not a binary classification task.
         """
         n_classes = len(np.unique(y_true))
         is_binary = n_classes == 2
         
-        if not self.is_classification or not is_binary:
+        if not self._is_classification or not is_binary:
             return None, None
         
         dpd = demographic_parity_difference(
@@ -275,22 +320,27 @@ class FeedbackLoopFairnessDegradationSimulator:
     # Simulation runner
     # ------------------------------------------------------------------
     def run_simulation(self, n_iterations):
-        """
-        Run the feedback-loop fairness simulation.
+        """Run the feedback-loop fairness degradation simulation.
+
+        Executes the simulation by iteratively training models where predictions
+        from previous iterations become training labels for subsequent ones,
+        demonstrating how feedback loops affect fairness and performance.
 
         For each iteration:
-        1. Split data sequentially
-        2. Train the model on current data
-        3. Replace future training labels with past predictions (simulating feedback loops)
-        4. Evaluate on the next data split
-        5. Compute and visualize group-level fairness metrics
-        6. Store results for summary visualization
+            1. Split data sequentially
+            2. Train the model on current data
+            3. Replace future training labels with past predictions
+            4. Evaluate on the next data split
+            5. Compute and visualize group-level fairness metrics
+            6. Store results for summary visualization
 
-        Input: n_iterations (int) - number of feedback loop iterations
-        Output: None (stores results in self.all_results, displays plots)
+        Parameters
+        ----------
+        n_iterations : int
+            Number of feedback loop iterations to simulate.
         """
-        self.all_results = []
-        partitions = self.data_split(n_iterations)
+        self._all_results = []
+        partitions = self._data_split(n_iterations)
 
         prev_predictions = None
 
@@ -306,38 +356,39 @@ class FeedbackLoopFairnessDegradationSimulator:
             # Replace target with predictions from previous iteration
             if prev_predictions is not None:
                 # Store original target for comparison/metrics
-                train_df["original_target"] = train_df[self.target].copy()
+                train_df["original_target"] = train_df[self._target].copy()
                 # Replace target with previous predictions
-                train_df[self.target] = prev_predictions
+                train_df[self._target] = prev_predictions
 
             # Prepare features (remove target, original target, original sensitive vars - encoded versions remain)
             X_train = (
                 train_df
-                .drop(columns=[self.target, "original_target"] + self.sensitive_vars, errors="ignore")
+                .drop(columns=[self._target, "original_target"] + self._sensitive_vars, errors="ignore")
                 .select_dtypes(include=[np.number])
             )
 
-            y_train = train_df[self.target]  # Now uses predictions as target
+            y_train = train_df[self._target]  # Now uses predictions as target
 
             X_test = (
                 test_df
-                .drop(columns=[self.target] + self.sensitive_vars, errors="ignore")
+                .drop(columns=[self._target] + self._sensitive_vars, errors="ignore")
                 .select_dtypes(include=[np.number])
             )
 
-            y_test = test_df[self.target]
+            y_test = test_df[self._target]
 
             # train a new model clone
-            model = clone(self.base_model)
+            model = clone(self._base_model)
             model.fit(X_train, y_train)
 
             # Predict and store predictions for next iteration
             y_pred = model.predict(X_test)
             prev_predictions = y_pred
 
-            print(f"\n{'*'*90}")
-            print(f"Iteration {i+1}/{n_iterations}")
-            print(f"{'*'*90}")
+            if self._show_iteration_data:
+                print(f"\n{'*'*90}")
+                print(f"Iteration {i+1}/{n_iterations}")
+                print(f"{'*'*90}")
 
             # Store results for this iteration
             iteration_result = {
@@ -347,7 +398,7 @@ class FeedbackLoopFairnessDegradationSimulator:
             }
 
             # Compute and visualize fairness metrics for each sensitive variable
-            for s in self.sensitive_vars:
+            for s in self._sensitive_vars:
                 grouped_metrics = self._compute_metrics_by_group(
                     y_test, y_pred, test_df[s]
                 )
@@ -365,43 +416,50 @@ class FeedbackLoopFairnessDegradationSimulator:
                     iteration_result["aggregate_fairness"][s]["DPD"] = demo_parity
                     iteration_result["aggregate_fairness"][s]["EOD"] = eqo
 
+                if self._show_iteration_data:
+                    print(f"\nSensitive variable: {s} (Iteration {i+1}/{n_iterations})")
+                    
+                    # Display group metrics table
+                    self._display_func(grouped_metrics)
+                    print()
+                    
+                    # Display DPD and EOD table (binary classification only)
+                    if demo_parity is not None and eqo is not None:
+                        aggregate_df = pd.DataFrame({
+                            "DPD": [demo_parity],
+                            "EOD": [eqo]
+                        }, index=[s])
+                        self._display_func(aggregate_df)
 
-                print(f"\nSensitive variable: {s} (Iteration {i+1}/{n_iterations})")
-                
-                # Display group metrics table
-                self.display_func(grouped_metrics)
-                print()
-                
-                # Display DPD and EOD table (binary classification only)
-                if demo_parity is not None and eqo is not None:
-                    aggregate_df = pd.DataFrame({
-                        "DPD": [demo_parity],
-                        "EOD": [eqo]
-                    }, index=[s])
-                    self.display_func(aggregate_df)
+                    self._plot_iteration_results(grouped_metrics, s, i + 1, demo_parity, eqo)
 
-                if self.show_iteration_plots:
-                    self.plot_iteration_results(grouped_metrics, s, i + 1, demo_parity, eqo)
-
-            self.all_results.append(iteration_result)
+            self._all_results.append(iteration_result)
 
         # After all iterations, show summary over time
-        self.plot_summary_results()
+        self._plot_summary_results()
 
 
     # ------------------------------------------------------------------
     # Iteration results plotting
     # ------------------------------------------------------------------
-    def plot_iteration_results(self, df, sensitive_var, iteration, dpd=None, eod=None):
-        """
-        Visualize fairness metrics for a single iteration.
+    def _plot_iteration_results(self, df, sensitive_var, iteration, dpd=None, eod=None):
+        """Visualize fairness metrics for a single iteration.
 
-        - Creates bar charts for each metric by sensitive group
-        - Optionally displays Demographic Parity Difference (DPD)
-        and Equalized Odds Difference (EOD) for binary classification
+        Creates bar charts for each metric by sensitive group, with optional
+        display of aggregate fairness metrics (DPD and EOD) for binary classification.
 
-        Input: df (DataFrame), sensitive_var (str), iteration (int), dpd (float), eod (float)
-        Output: None (displays matplotlib plots)
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            Metrics DataFrame with groups as index and metrics as columns.
+        sensitive_var : str
+            Name of the sensitive variable being analyzed.
+        iteration : int
+            Current iteration number for the plot title.
+        dpd : float, optional
+            Demographic Parity Difference value. Default is None.
+        eod : float, optional
+            Equalized Odds Difference value. Default is None.
         """
         df_plot = df.reset_index().melt(
             id_vars=sensitive_var,
@@ -527,16 +585,11 @@ class FeedbackLoopFairnessDegradationSimulator:
     # ------------------------------------------------------------------
     # Summary results plotting
     # ------------------------------------------------------------------
-    def plot_summary_results(self):
-        """
-        Visualize how fairness and performance metrics evolve
-        across iterations.
+    def _plot_summary_results(self):
+        """Visualize how fairness and performance metrics evolve across iterations.
 
-        - Line plots show metric trends over time by group
-        - DPD and EOD are plotted separately (classification only)
-
-        Input: None 
-        Output: None (displays matplotlib summary plots)
+        Creates line plots showing metric trends over time by group,
+        with separate plots for DPD and EOD (classification only).
         """
 
         print(f"\n{'='*150}")
@@ -544,16 +597,15 @@ class FeedbackLoopFairnessDegradationSimulator:
         print(f"{'='*150}")
 
 
-        if not self.all_results:
+        if not self._all_results:
             print("No results to plot. Run simulation first.")
             return
             
-        
         records = []
         aggregate_records = []
 
         # Flatten results into records for plotting
-        for it in self.all_results:
+        for it in self._all_results:
             for s, df in it["fairness"].items():
                 for group in df.index:
                     for metric in df.columns:
@@ -568,7 +620,7 @@ class FeedbackLoopFairnessDegradationSimulator:
                         )
                 
                 # Collect DPD and EOD separately (classification only)
-                if self.is_classification and s in it["aggregate_fairness"]:
+                if self._is_classification and s in it["aggregate_fairness"]:
                     aggregate_records.append({
                         "iteration": it["iteration"],
                         "sensitive_var": s,
@@ -594,8 +646,6 @@ class FeedbackLoopFairnessDegradationSimulator:
         
             sub = summary_df[summary_df["sensitive_var"] == s]
             
-
-
             g = sns.FacetGrid(
                 sub,
                 col="metric",
